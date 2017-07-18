@@ -15,7 +15,7 @@ library(knitr)
 library(pander)
 library(plyr)
 library(tableone)
-melanoma <- read.csv("C:\\Ongoing\\repro\\docker\\melanoma_clin.csv", header=TRUE,sep=",")
+melanoma <- read.csv("data/melanoma_clin.csv", header=TRUE,sep=",")
 ```
 
 ### Identifying cohort for analysis 
