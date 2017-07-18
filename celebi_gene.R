@@ -4,7 +4,7 @@ library(rms)
 library(survplot)
 library(CPE)
 
-melanoma <- read.table("H:\\Jia\\Celebi\\melanoma_clin.csv", header=TRUE,sep=",")
+melanoma <- read.table("data/melanoma_clin.csv", header=TRUE,sep=",")
 #remove epi2 and those without survival data
 mela1<-melanoma[melanoma$subtype!="Epi2",] # 6 removed left 45
 mela2<-mela1[mela1$os!="n.a.",]# 5 removed left 40
