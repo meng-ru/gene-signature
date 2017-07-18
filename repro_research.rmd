@@ -1,0 +1,235 @@
+---
+title: "Reproducibility"
+output: pdf_document
+
+---
+```{r results='hide', message=FALSE, warning=FALSE,echo=FALSE,cache=TRUE}
+library(survival)
+library(ggplot2)
+library(rms)
+library(survplot) 
+library(CPE)
+library(survminer)
+library(pander)
+library(knitr)
+library(pander)
+library(plyr)
+library(tableone)
+melanoma <- read.csv("C:\\Ongoing\\repro\\docker\\melanoma_clin.csv", header=TRUE,sep=",")
+```
+
+### Identifying cohort for analysis 
+```{r}
+#Initial sample size: N=51
+#remove epi2(n=6) since this subset is too small
+mela1<-melanoma[melanoma$subtype!="Epi2",] # 6 removed left 45
+#remove those without survival data
+mela2<-mela1[mela1$os!="n.a.",]# 5 removed left 40
+```
+Final cohort N = 40.
+Final cohort N=`r dim(mela2)[1]`. 
+*mela2* will be the dataset for further analysis. All exclusions are made through coding, with no changes in the original dataset. 
+
+
+```{r results='hide', message=FALSE, warning=FALSE,cache=TRUE,echo=FALSE}
+
+mela2$death<-ifelse(mela2$status=="Deceased",1,0)
+mela2$os <- as.numeric(as.character(mela2$os))
+
+mela2$rcat[mela2$subtype=="Epi1"]<-0
+mela2$rcat[mela2$subtype=="Epi3"]<-1
+mela2$subtype<-droplevels(mela2$subtype)
+
+mela2$ulcercat[mela2$ulcer=="Yes"]<-1
+mela2$ulcercat[mela2$ulcer=="No"]<-0
+
+mela2$x <- subset(mela2,mela2$subtype!="Epi2")
+```
+
+### Recode some variables for analysis
+```{r results='hide', message=FALSE, warning=FALSE,cache=TRUE}
+#collapse subgroups of AJCC and T category
+mela2$stage[mela2$ajcc=="Ia"|mela2$ajcc=="Ib"]<-1 
+mela2$stage[mela2$ajcc=="IIa"|mela2$ajcc=="IIb"|mela2$ajcc=="IIc"]<-2
+mela2$stage[mela2$ajcc=="IIIa"|mela2$ajcc=="IIIb"|mela2$ajcc=="IIIc"]<-3 
+
+mela2$tcat[mela2$t=="T1"|mela2$t=="T1a"]<-1
+mela2$tcat[mela2$t=="T2"|mela2$t=="T2a"|mela2$t=="T2b"]<-2
+mela2$tcat[mela2$t=="T3"|mela2$t=="T3a"|mela2$t=="T3b"]<-3
+mela2$tcat[mela2$t=="T4a"|mela2$t=="T4b"]<-4
+
+mela2$os<-as.numeric(mela2$os)
+```
+
+This data set contains demographics, clinical variables including AJCC staging factors, and risk groups defined by a 122-gene signature on **`r nrow(mela2)`** melanoma patients. The patients were followed since diagnosis until death or lost of follow-up. **`r sum(mela2$death==1)`** died while the remaining survivors have the median follow-up of **`r median(mela2$os[mela2$death==0])`** days. 
+
+```{r}
+#Table 1 - Summary of variables
+library(tableone)
+vars<- c("subtype","sex","ulcer","t","tcat","n","m","ajcc","stage","status","os")
+categorical <- c("subtype","sex","ulcer","t","tcat","n","m","ajcc","stage","status")
+nonnormal <- c("os")
+t1<- CreateTableOne(vars = vars, factorVars = categorical,
+               data = mela2,includeNA = FALSE)
+print(t1,showAllLevels = TRUE,nonnormal = nonnormal)
+
+
+```
+
+## K-M plots
+
+### General K-M plot
+```{r, echo=FALSE,cache=TRUE}
+km<- survfit(Surv(os, death) ~ 1, data = mela2, conf.type = "log-log")
+
+ggsurvplot(km, color = "#2E9FDF", pval=TRUE,main="Overall Survival",
+           font.main = c(12,"bold","darkblue"),font.x =  12,font.y = 12,font.tickslab = 9,risk.table = TRUE)
+
+```
+
+
+```{r, echo=FALSE,cache=TRUE,eval=FALSE}
+km.by.type <- survfit(Surv(os, death == 1) ~ subtype, data = mela2, conf.type = "log-log")
+subtype.diff<-survdiff(Surv(os, death) ~ subtype, data=mela2)
+pander(subtype.diff)
+x <- read.table(textConnection(capture.output(km.by.type)),skip=2,header=TRUE)
+colnames(x)<-c("n","events","Median Survival","95%LowerCL","95%HigherCL")
+pander(x)
+ggsurvplot(km.by.type, size = 0.7,color = "#2E9FDF", pval=T,risk.table = "abs_pct",pval.size = 4,
+           main="Overall Survival by Subtype",
+           font.main = c(12, "bold", "darkblue"),legend=c("bottom"),
+           font.x =  12,font.y = 12,font.tickslab = 9,
+           risk.table.fontsize = 3)
+```
+```{r, echo=FALSE,cache=TRUE,eval=F}
+km.by.stage <- survfit(Surv(os, death == 1) ~ stage, data = mela2, conf.type = "log-log")
+stage.diff<-survdiff(Surv(os, death) ~ stage, data=mela2)
+pander(stage.diff)
+x <- read.table(textConnection(capture.output(km.by.stage)),skip=2,header=TRUE)
+colnames(x)<-c("n","events","Median Survival","95%LowerCL","95%HigherCL")
+pander(x)
+ggsurvplot(km.by.stage, size = 0.7,color = "#2E9FDF", pval=T,risk.table = "abs_pct",pval.size = 4,
+           main="Overall Survival by Stage",
+           font.main = c(12, "bold", "darkblue"),legend=c("bottom"),
+           font.x =  12,font.y = 12,font.tickslab = 9,
+           risk.table.height=0.3,risk.table.fontsize = 3)
+```
+
+### K-M plot by T category
+```{r, echo=FALSE,cache=TRUE}
+km.by.t <- survfit(Surv(os, death == 1) ~ tcat, data = mela2, conf.type = "log-log")
+#t.diff<-survdiff(Surv(os, death) ~ tcat, data=mela2)
+#pander(t.diff)
+x <- read.table(textConnection(capture.output(km.by.t)),skip=2,header=TRUE)
+colnames(x)<-c("n","events","Median Survival","95%LowerCL","95%HigherCL")
+pander(x,caption =  "Survival Summary Statistics")
+ggsurvplot(km.by.t, color = "#2E9FDF", size = 0.7,pval=T,risk.table = "abs_pct",pval.size = 4,
+           main="Overall Survival by T category",
+           font.main = c(12, "bold", "darkblue"),legend=c("bottom"),
+           font.x =  12,font.y = 12,font.tickslab = 9,
+           risk.table.height=0.35,risk.table.fontsize = 3)
+```
+
+### K-M plot by Epi Risk Classifiers
+```{r, echo=FALSE,cache=TRUE}
+km.by.r <- survfit(Surv(os, death == 1) ~ rcat, data = mela2, conf.type = "log-log")
+#t.diff<-survdiff(Surv(os, death) ~ tcat, data=mela2)
+#pander(t.diff)
+x <- read.table(textConnection(capture.output(km.by.r)),skip=2,header=TRUE)
+colnames(x)<-c("n","events","Median Survival","95%LowerCL","95%HigherCL")
+pander(x,caption =  "Survival Summary Statistics")
+ggsurvplot(km.by.r, color = "#2E9FDF", size = 0.7,pval=T,risk.table = "abs_pct",pval.size = 4,
+           main="Overall Survival by Epi Risk Classifiers",
+           font.main = c(12, "bold", "darkblue"),legend=c("bottom"),
+           legend.labs = c("Epi1", "Epi3"),
+           font.x =  12,font.y = 12,font.tickslab = 9,
+           risk.table.height=0.35,risk.table.fontsize = 3)
+```
+
+
+### K-M plot by T category and subtype
+```{r, echo=FALSE,cache=TRUE}
+### KM plots by tcat and genetic risk groups
+km.by.tr <- survfit(Surv(os, death == 1) ~ tcat+subtype, data = mela2, conf.type = "log-log")
+#tsub.diff<-survdiff(Surv(os, death) ~tcat+subtype, data=mela2)
+#pander(tsub.diff)
+x.table <- read.table(textConnection(capture.output(km.by.tr)),skip=4,sep="")
+x.name <- read.table(textConnection(capture.output(km.by.tr)),skip=3,nrow=1,sep="",stringsAsFactors = FALSE)
+names(x.table)<-append(c("Tcat","Subtype"),x.name)
+pander(x.table,caption= "Survival Summary Statistics")
+ggsurvplot(km.by.tr, size = 0.7, color = "#2E9FDF", pval=T,risk.table = "abs_pct",
+           main="Overall Survival by T category and Subtype",pval.size = 4,
+           font.main = c(12, "bold", "darkblue"),legend=c("bottom"),
+           font.x =  12,font.y = 12,font.tickslab = 9,surv.plot.height = 1.5,
+           risk.table.height=0.85,risk.table.fontsize = 3)
+```
+
+```{r, echo=FALSE,cache=TRUE,eval=F}
+km.by.sr <- survfit(Surv(os, death == 1) ~ stage+subtype, data = mela2, conf.type = "log-log")
+ssub.diff<-survdiff(Surv(os, death) ~stage+subtype, data=mela2)
+pander(ssub.diff)
+ggsurvplot(km.by.sr, size = 0.7, color = "#2E9FDF", pval=T,risk.table = "abs_pct",
+           main="Overall Survival by T category and Subtype",pval.size = 4,
+           font.main = c(12, "bold", "darkblue"),legend=c("bottom"),
+           font.x =  12,font.y = 12,font.tickslab = 9,surv.plot.height = 1.5,
+           risk.table.height=0.85,risk.table.fontsize = 3)
+```
+
+# Reproducibility Example 
+
+* Scenerio 1:
+     
+     Modify the outlier: If thickness > 4mm, divide by 3. 
+```{r,cache=T}
+mela2$thick1<-ifelse(mela2$thick>4,mela2$thick/3,mela2$thick)
+
+mela2$tcat1[mela2$thick1<=1]<-1
+mela2$tcat1[1<mela2$thick1&mela2$thick1<=2]<-2
+mela2$tcat1[2<mela2$thick1&mela2$thick1<=4]<-3
+mela2$tcat1[mela2$thick1>4]<-4
+```
+```{r,echo=F,cache=T}
+pander(table(mela2$tcat),caption="Original Freq of T category")
+pander(table(mela2$tcat1),caption="Modified Freq of T category")
+```
+
+## K-M plot by new T category
+```{r, echo=F,cache=T}
+km.by.t1 <- survfit(Surv(os, death == 1) ~ tcat1, data = mela2, conf.type = "log-log")
+x <- read.table(textConnection(capture.output(km.by.t1)),skip=2,header=TRUE)
+colnames(x)<-c("n","events","Median Survival","95%LowerCL","95%HigherCL")
+pander(x,caption = "Survival Summary Statistics")
+ggsurvplot(km.by.t1, color = "#2E9FDF", size = 0.7,pval=T,risk.table = "abs_pct",pval.size = 4,
+           main="Overall Survival by new T category",
+           font.main = c(12, "bold", "darkblue"),legend=c("bottom"),
+           font.x =  12,font.y = 12,font.tickslab = 9,
+           risk.table.height=0.35,risk.table.fontsize = 3)
+```
+
+### K-M plot by new T category and subtype
+```{r, echo=F,cache=T}
+km.by.tr1 <- survfit(Surv(os, death == 1) ~ tcat1+subtype, data = mela2, conf.type = "log-log")
+x.table <- read.table(textConnection(capture.output(km.by.tr1)),skip=4,sep="")
+x.name <- read.table(textConnection(capture.output(km.by.tr1)),skip=3,nrow=1,sep="",stringsAsFactors = FALSE)
+names(x.table)<-append(c("Tcat","Subtype"),x.name)
+pander(x.table,caption = "Survival Summary Statistics")
+ggsurvplot(km.by.tr1, size = 0.7, color = "#2E9FDF", pval=T,risk.table = "abs_pct",
+           main="Overall Survival by T category and Subtype",pval.size = 4,
+           font.main = c(12, "bold", "darkblue"),legend=c("bottom"),
+           font.x =  12,font.y = 12,font.tickslab = 9,surv.plot.height = 1.5,
+           risk.table.height=0.85,risk.table.fontsize = 3)
+```
+
+
+### Model Comparison
+```{r, cache=T}
+rs.1<- coxph(Surv(os,death)~1,data=mela2)
+rs.2<- coxph(Surv(os,death)~rcat,data=mela2)
+anova(rs.1,rs.2)
+```
+This shows the model with epi risk classifers ("rcat") significantly improves the model fitting. 
+
+```{r, cache=T}
+cpe<-phcpe(rs.2,CPE.SE=TRUE,out.ties=FALSE)
+```
+This calculates the C-index for the model adjusting for epi risk classifiers as `r round(cpe$CPE,4)`, with the SE of `r round(cpe$CPE.SE,4)`. 
